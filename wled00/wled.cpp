@@ -1,6 +1,7 @@
 #define WLED_DEFINE_GLOBAL_VARS //only in one source file, wled.cpp!
 #include "wled.h"
 #include "wled_ethernet.h"
+#include "wled_cloud_auth.h"   // EvoLights: init auth before initServer()
 #include "ota_update.h"
 #ifdef WLED_ENABLE_AOTA
   #define NO_OTA_PORT
@@ -483,6 +484,11 @@ void WLED::setup()
   DEBUG_PRINTLN(F("Reading config"));
   bool needsCfgSave = deserializeConfigFromFS();
   DEBUG_PRINTF_P(PSTR("heap %u\n"), getFreeHeapSize());
+
+  // EvoLights: register the AuthGate handler now, BEFORE usermods or initServer
+  // run, so it has first dibs on canHandle() for every request — including
+  // routes that usermods (e.g. cloud_relay) add in their setup().
+  EvoAuth::init(server);
 
 #if defined(STATUSLED) && STATUSLED>=0
   if (!PinManager::isPinAllocated(STATUSLED)) {

@@ -1,0 +1,103 @@
+name: Sync upstream WLED
+
+# Branch model:
+#   main             — clean tracking branch, fast-forwarded from upstream/main
+#   evolights/main   — our working branch with EvoLights customizations
+#
+# This workflow runs nightly (or on-demand). It:
+#   1. Fast-forwards `main` to wled-dev/WLED@main
+#   2. Tries to merge `main` into `evolights/main` automatically
+#   3. On clean merge → opens (or updates) a PR with the result + build artifacts
+#   4. On conflict   → opens an issue listing conflicting files for manual resolution
+#
+# Our customizations are preserved because they live in:
+#   - new files (wled00/wled_cloud_auth.{h,cpp}, usermods/cloud_relay/*) — never conflict
+#   - small touch-points in upstream files (wled.cpp, cfg.cpp) — only conflict if upstream
+#     also edits the same hunks, which is rare
+
+on:
+  schedule:
+    - cron: '17 7 * * *'   # 07:17 UTC daily
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: 'Upstream ref to merge (default: main)'
+        default: 'main'
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.email "evolights-bot@users.noreply.github.com"
+          git config user.name  "EvoLights Sync Bot"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/wled/WLED.git || true
+          git fetch upstream "${{ github.event.inputs.upstream_ref || 'main' }}"
+
+      - name: Fast-forward main from upstream
+        run: |
+          git checkout main
+          git merge --ff-only upstream/${{ github.event.inputs.upstream_ref || 'main' }}
+          git push origin main
+
+      - name: Attempt merge into evolights/main
+        id: merge
+        run: |
+          git checkout evolights/main
+          if git merge --no-ff --no-edit -m "chore: sync upstream WLED into evolights/main" main; then
+            echo "result=clean" >> "$GITHUB_OUTPUT"
+            BRANCH="sync/upstream-$(date +%Y%m%d)"
+            git checkout -b "$BRANCH"
+            git push -u origin "$BRANCH"
+            echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=conflict" >> "$GITHUB_OUTPUT"
+            echo "files<<EOF" >> "$GITHUB_OUTPUT"
+            git diff --name-only --diff-filter=U >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+            git merge --abort
+          fi
+
+      - name: Open sync PR
+        if: steps.merge.outputs.result == 'clean'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create \
+            --base evolights/main \
+            --head ${{ steps.merge.outputs.branch }} \
+            --title "Sync upstream WLED $(date +%Y-%m-%d)" \
+            --body "Automated merge of upstream WLED \`main\` into \`evolights/main\`. EvoLights customizations were preserved without conflict. Review the diff and run firmware-build.yml to verify before merging." \
+            || echo "PR may already exist"
+
+      - name: Open conflict issue
+        if: steps.merge.outputs.result == 'conflict'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --title "Upstream WLED sync conflict $(date +%Y-%m-%d)" \
+            --body "Automated merge of upstream into \`evolights/main\` hit conflicts in:
+\`\`\`
+${{ steps.merge.outputs.files }}
+\`\`\`
+Resolve locally with:
+\`\`\`
+git fetch upstream && git checkout evolights/main && git merge main
+\`\`\`" \
+            --label "sync-conflict"

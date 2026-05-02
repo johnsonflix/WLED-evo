@@ -1,0 +1,77 @@
+name: Build EvoLights firmware
+
+on:
+  push:
+    branches: [evolights/main]
+  pull_request:
+    branches: [evolights/main]
+  workflow_dispatch:
+    inputs:
+      env:
+        description: 'PlatformIO env to build (default: esp32dev)'
+        default: 'esp32dev'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env:
+          - esp32dev
+          - esp32_eth
+          - esp32s3dev_8MB
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Enable EvoLights cloud_relay usermod
+        run: |
+          # Append our usermod to the build matrix without editing platformio.ini
+          # so upstream merges stay clean.
+          mkdir -p .pio
+          cat > platformio_override.ini <<'EOF'
+          [env:${{ matrix.env }}]
+          custom_usermods = ${sysenv.CUSTOM_USERMODS} cloud_relay
+          build_flags     = ${env:${{ matrix.env }}.build_flags} -D USERMOD_EVOLIGHTS_CLOUD_RELAY
+          EOF
+
+      - name: Build ${{ matrix.env }}
+        env:
+          CUSTOM_USERMODS: ""
+        run: |
+          pio run -e "${{ matrix.env }}" || \
+          (echo "Override may have failed; trying plain build" && pio run -e "${{ matrix.env }}")
+
+      - name: Stage artifacts
+        run: |
+          mkdir -p artifacts
+          find .pio/build/${{ matrix.env }} -maxdepth 1 -name '*.bin' -exec cp {} artifacts/ \;
+          ls -lh artifacts/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.env }}
+          path: artifacts/*.bin
+          retention-days: 30
