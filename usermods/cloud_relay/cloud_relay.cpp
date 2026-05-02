@@ -13,11 +13,11 @@
   REGISTER_USERMOD(evolights_cloud_relay);
 #else
 
+// wled.h (above) transitively provides ArduinoJson, ESPAsyncWebServer, and WiFi.
+// Including them again here would fail because PIO compiles usermods in an
+// isolated library scope that doesn't see WLED's vendored deps directly.
 #include "wled_cloud_auth.h"
-#include <WiFi.h>
 #include <PubSubClient.h>
-#include <ArduinoJson.h>
-#include <ESPAsyncWebServer.h>
 #include <HTTPClient.h>
 
 /*
