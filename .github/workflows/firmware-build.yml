@@ -23,7 +23,7 @@ jobs:
         env:
           - esp32dev_evolights
           - esp32_eth_evolights
-          - esp32s3dev_8MB_evolights
+          - esp32s3dev_8MB_qspi_evolights
     steps:
       - uses: actions/checkout@v4
 

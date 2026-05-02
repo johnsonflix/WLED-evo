@@ -103,9 +103,9 @@ require_in_file usermods/cloud_relay/cloud_relay.cpp 'REGISTER_USERMOD' \
   "cloud_relay registers itself via REGISTER_USERMOD"
 
 # EvoLights envs in platformio.ini — what firmware-build.yml builds.
-require_in_file platformio.ini '^\[env:esp32dev_evolights\]'        "platformio.ini: env esp32dev_evolights defined"
-require_in_file platformio.ini '^\[env:esp32_eth_evolights\]'       "platformio.ini: env esp32_eth_evolights defined"
-require_in_file platformio.ini '^\[env:esp32s3dev_8MB_evolights\]'  "platformio.ini: env esp32s3dev_8MB_evolights defined"
+require_in_file platformio.ini '^\[env:esp32dev_evolights\]'             "platformio.ini: env esp32dev_evolights defined"
+require_in_file platformio.ini '^\[env:esp32_eth_evolights\]'            "platformio.ini: env esp32_eth_evolights defined"
+require_in_file platformio.ini '^\[env:esp32s3dev_8MB_qspi_evolights\]'  "platformio.ini: env esp32s3dev_8MB_qspi_evolights defined"
 
 # ---------------------------------------------------------------------
 # 4. Ordering invariant — the AuthGate MUST be registered before usermod
