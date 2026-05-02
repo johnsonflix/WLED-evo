@@ -17,6 +17,7 @@
 // Including them again here would fail because PIO compiles usermods in an
 // isolated library scope that doesn't see WLED's vendored deps directly.
 #include "wled_cloud_auth.h"
+#include "ota_verifier.h"
 #include <PubSubClient.h>
 #include <HTTPClient.h>
 
@@ -76,7 +77,12 @@ namespace {
 
   // Dispatch an MQTT command into the local HTTP stack via loopback.
   // Body schema: {"id":"<corr-id>","path":"/json/state","method":"POST","body":{...}}
-  void onCmdMessage(char* /*topic*/, byte *payload, unsigned int len) {
+  void onCmdMessage(char *topic, byte *payload, unsigned int len) {
+    // Route OTA manifests to the signed-firmware verifier.
+    if (topic && strstr(topic, "/ota")) {
+      EvoLights::OTA::processManifest((const char*)payload, len);
+      return;
+    }
     StaticJsonDocument<2048> doc;
     if (deserializeJson(doc, payload, len)) return;
     const char *id     = doc["id"]     | "";
