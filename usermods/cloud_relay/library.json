@@ -1,14 +1,9 @@
 {
   "name": "EvoLightsCloudRelay",
   "build": {
-    "libArchive": false,
-    "libLDFMode": "deep+",
-    "libCompatMode": "soft"
+    "libArchive": false
   },
-  "dependencies": [
-    { "name": "WiFiClientSecure", "platforms": "espressif32" },
-    { "name": "HTTPClient",       "platforms": "espressif32" },
-    { "name": "Update",           "platforms": "espressif32" },
-    { "name": "PubSubClient", "owner": "knolleary", "version": "^2.8" }
-  ]
+  "dependencies": {
+    "knolleary/PubSubClient": "^2.8"
+  }
 }

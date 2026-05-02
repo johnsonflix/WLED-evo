@@ -14,7 +14,7 @@
 #else
 
 #include "wled_cloud_auth.h"
-#include <WiFiClientSecure.h>
+#include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
@@ -23,10 +23,18 @@
 /*
  * EvoLights Cloud Relay
  *
- * Outbound-only MQTT-over-TLS bridge. After pairing, the device connects to
- * the EvoLights cloud broker and subscribes to its per-device command topic.
- * Commands arriving over MQTT are dispatched into the local HTTP stack with
- * the EvoAuth cloud-trusted token, so they bypass the local auth gate.
+ * Outbound MQTT bridge. After pairing, the device connects to the EvoLights
+ * cloud broker and subscribes to its per-device command topic. Commands
+ * arriving over MQTT are dispatched into the local HTTP stack with the
+ * EvoAuth cloud-trusted token, so they bypass the local auth gate.
+ *
+ * !!! TLS TODO !!!
+ * Currently uses plain WiFiClient (no TLS). The original design called for
+ * MQTT-over-TLS on port 8883, but WLED's build system makes WiFiClientSecure
+ * unreachable from a usermod's compile scope. Plain TCP is a placeholder so
+ * the rest of the architecture can ship; before any production release we
+ * MUST swap in TLS. Per-device auth (mqtt_user/mqtt_pass) still works, but
+ * a passive eavesdropper sees credentials in the clear.
  */
 
 namespace EvoLights {
@@ -43,7 +51,7 @@ namespace {
   String g_caCertPem;        // root CA pem for the broker
 
   // ---- runtime state ----
-  WiFiClientSecure g_tls;
+  WiFiClient g_tcp;          // TODO: swap to TLS client (see file header note)
   PubSubClient *g_mqtt = nullptr;
   bool g_connected = false;
   uint32_t g_nextReconnectAt = 0;
@@ -108,20 +116,13 @@ namespace {
     g_nextReconnectAt = millis() + 5000;
 
     if (!g_mqtt) {
-      g_mqtt = new PubSubClient(g_tls);
+      g_mqtt = new PubSubClient(g_tcp);
       g_mqtt->setBufferSize(4096);
       g_mqtt->setCallback(onCmdMessage);
     }
     g_mqtt->setServer(g_brokerHost.c_str(), g_brokerPort);
-
-    if (g_caCertPem.length()) {
-      g_tls.setCACert(g_caCertPem.c_str());
-    } else {
-      // Until a CA is supplied via pairing, refuse the connection rather than
-      // silently fall back to insecure mode. The cloud must always send one.
-      Serial.println(F("[CloudRelay] no CA cert; refusing to connect"));
-      return;
-    }
+    // TODO TLS: when WiFiClientSecure is wired in, gate on g_caCertPem and
+    // call g_tls.setCACert(g_caCertPem.c_str()) here. Today we connect plain.
 
     String clientId = String(F("evo-")) + g_deviceId;
     if (g_mqtt->connect(clientId.c_str(), g_mqttUser.c_str(), g_mqttPass.c_str())) {
