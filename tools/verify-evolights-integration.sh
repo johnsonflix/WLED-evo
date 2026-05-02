@@ -150,7 +150,7 @@ section "Auth API surface"
 
 require_in_file wled00/wled_cloud_auth.h 'void init\(AsyncWebServer'        "EvoAuth::init declared"
 require_in_file wled00/wled_cloud_auth.h 'bool readFromWsec\(.*JsonObject'  "EvoAuth::readFromWsec declared"
-require_in_file wled00/wled_cloud_auth.h 'void writeToWsec\(class JsonObject'  "EvoAuth::writeToWsec declared"
+require_in_file wled00/wled_cloud_auth.h 'void writeToWsec\(.*JsonObject'      "EvoAuth::writeToWsec declared"
 require_in_file wled00/wled_cloud_auth.h 'cloudTrustedToken\(\)'              "EvoAuth::cloudTrustedToken declared (cloud_relay depends on it)"
 
 # ---------------------------------------------------------------------

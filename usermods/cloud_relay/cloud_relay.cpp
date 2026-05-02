@@ -243,10 +243,19 @@ class CloudRelay : public Usermod {
     routesRegistered = true;
 
     // POST /cloud/pair  — body: { code, cloud_api }
+    // WLED's vendored AsyncCallbackJsonWebHandler hands us the raw request;
+    // the JSON body lives in request->_tempObject (a uint8_t*) and we
+    // deserialize it ourselves.
     AsyncCallbackJsonWebHandler *pairHandler = new AsyncCallbackJsonWebHandler(
       "/cloud/pair",
-      [](AsyncWebServerRequest *request, JsonVariant &json) {
-        JsonObject obj = json.as<JsonObject>();
+      [](AsyncWebServerRequest *request) {
+        StaticJsonDocument<512> doc;
+        if (request->_tempObject == nullptr ||
+            deserializeJson(doc, (uint8_t*)request->_tempObject)) {
+          request->send(400, F("application/json"), F("{\"error\":\"bad json\"}"));
+          return;
+        }
+        JsonObject obj = doc.as<JsonObject>();
         handlePair(request, obj);
       });
     server.addHandler(pairHandler);

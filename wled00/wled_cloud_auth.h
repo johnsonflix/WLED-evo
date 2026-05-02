@@ -26,6 +26,10 @@
  */
 
 #include <Arduino.h>
+// JsonObject is a typedef in ArduinoJson v6, so it can't be forward-declared
+// with `class JsonObject`. Pull in the wled-vendored ArduinoJson header so
+// the type is fully defined for our wsec.json hook signatures.
+#include "src/dependencies/json/ArduinoJson-v6.h"
 
 class AsyncWebServer;
 class AsyncWebServerRequest;
@@ -61,8 +65,8 @@ namespace EvoAuth {
   const char* cloudTrustedToken();
 
   // wsec.json hooks — called by cfg.cpp.
-  bool readFromWsec(const class JsonObject &root);
-  void writeToWsec(class JsonObject &root);
+  bool readFromWsec(const JsonObject &root);
+  void writeToWsec(JsonObject &root);
 
   // Programmatic credential management (used by /auth/setup and /auth/password).
   // Returns true on success. Hashes pw with PBKDF2-SHA256 + per-account salt.
