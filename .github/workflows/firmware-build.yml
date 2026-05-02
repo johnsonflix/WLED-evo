@@ -1,15 +1,15 @@
 name: Build EvoLights firmware
 
+# Builds the *_evolights envs defined at the bottom of platformio.ini (anchored
+# under EVOLIGHTS-ANCHOR: env-evolights). Each is an extension of an upstream
+# WLED env that pulls in the cloud_relay usermod and the WLED_FORK_NAME flag.
+
 on:
   push:
     branches: [evolights/main]
   pull_request:
     branches: [evolights/main]
   workflow_dispatch:
-    inputs:
-      env:
-        description: 'PlatformIO env to build (default: esp32dev)'
-        default: 'esp32dev'
 
 permissions:
   contents: read
@@ -21,9 +21,9 @@ jobs:
       fail-fast: false
       matrix:
         env:
-          - esp32dev
-          - esp32_eth
-          - esp32s3dev_8MB
+          - esp32dev_evolights
+          - esp32_eth_evolights
+          - esp32s3dev_8MB_evolights
     steps:
       - uses: actions/checkout@v4
 
@@ -46,28 +46,13 @@ jobs:
       - name: Install PlatformIO
         run: pip install --upgrade platformio
 
-      - name: Enable EvoLights cloud_relay usermod
-        run: |
-          # Append our usermod to the build matrix without editing platformio.ini
-          # so upstream merges stay clean.
-          mkdir -p .pio
-          cat > platformio_override.ini <<'EOF'
-          [env:${{ matrix.env }}]
-          custom_usermods = ${sysenv.CUSTOM_USERMODS} cloud_relay
-          build_flags     = ${env:${{ matrix.env }}.build_flags} -D USERMOD_EVOLIGHTS_CLOUD_RELAY
-          EOF
-
       - name: Build ${{ matrix.env }}
-        env:
-          CUSTOM_USERMODS: ""
-        run: |
-          pio run -e "${{ matrix.env }}" || \
-          (echo "Override may have failed; trying plain build" && pio run -e "${{ matrix.env }}")
+        run: pio run -e "${{ matrix.env }}"
 
       - name: Stage artifacts
         run: |
           mkdir -p artifacts
-          find .pio/build/${{ matrix.env }} -maxdepth 1 -name '*.bin' -exec cp {} artifacts/ \;
+          find ".pio/build/${{ matrix.env }}" -maxdepth 1 -name '*.bin' -exec cp {} artifacts/ \;
           ls -lh artifacts/
 
       - uses: actions/upload-artifact@v4

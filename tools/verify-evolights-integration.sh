@@ -57,6 +57,7 @@ declare -A ANCHORS=(
   ["include-auth-header:wled00/cfg.cpp"]=1
   ["auth-read-wsec:wled00/cfg.cpp"]=1
   ["auth-write-wsec:wled00/cfg.cpp"]=1
+  ["env-evolights:platformio.ini"]=1
 )
 
 for key in "${!ANCHORS[@]}"; do
@@ -100,6 +101,11 @@ require_in_file wled00/cfg.cpp '^[[:space:]]*EvoAuth::writeToWsec\(root\);' "cfg
 
 require_in_file usermods/cloud_relay/cloud_relay.cpp 'REGISTER_USERMOD' \
   "cloud_relay registers itself via REGISTER_USERMOD"
+
+# EvoLights envs in platformio.ini — what firmware-build.yml builds.
+require_in_file platformio.ini '^\[env:esp32dev_evolights\]'        "platformio.ini: env esp32dev_evolights defined"
+require_in_file platformio.ini '^\[env:esp32_eth_evolights\]'       "platformio.ini: env esp32_eth_evolights defined"
+require_in_file platformio.ini '^\[env:esp32s3dev_8MB_evolights\]'  "platformio.ini: env esp32s3dev_8MB_evolights defined"
 
 # ---------------------------------------------------------------------
 # 4. Ordering invariant — the AuthGate MUST be registered before usermod
