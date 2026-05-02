@@ -1,6 +1,10 @@
 {
   "name": "EvoLightsCloudRelay",
-  "build": { "libArchive": false },
+  "build": {
+    "libArchive": false,
+    "libLDFMode": "deep+",
+    "libCompatMode": "soft"
+  },
   "dependencies": {
     "knolleary/PubSubClient": "^2.8"
   }
