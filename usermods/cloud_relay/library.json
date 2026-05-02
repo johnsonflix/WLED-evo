@@ -5,7 +5,10 @@
     "libLDFMode": "deep+",
     "libCompatMode": "soft"
   },
-  "dependencies": {
-    "knolleary/PubSubClient": "^2.8"
-  }
+  "dependencies": [
+    { "name": "WiFiClientSecure", "platforms": "espressif32" },
+    { "name": "HTTPClient",       "platforms": "espressif32" },
+    { "name": "Update",           "platforms": "espressif32" },
+    { "name": "PubSubClient", "owner": "knolleary", "version": "^2.8" }
+  ]
 }
