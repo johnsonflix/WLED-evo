@@ -1,8 +1,6 @@
-#include "wled.h"
+#include "wled.h"        // brings in ArduinoJson (vendored), ESPAsyncWebServer, etc.
 #include "wled_cloud_auth.h"
 
-#include <ESPAsyncWebServer.h>
-#include <ArduinoJson.h>
 #include <mbedtls/pkcs5.h>
 #include <mbedtls/md.h>
 #include <mbedtls/base64.h>
