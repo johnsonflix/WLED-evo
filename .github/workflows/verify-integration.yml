@@ -1,0 +1,26 @@
+name: Verify EvoLights integration
+
+# Asserts the EvoLights firmware customizations are structurally intact:
+# anchor comments present in patched upstream files, required call sites alive,
+# hook order correct, usermod registered. Catches the failure mode where an
+# upstream merge or a hand-edit silently removes/relocates our hooks but the
+# code still compiles.
+#
+# Make this a REQUIRED status check on the evolights/main branch via:
+#   Settings -> Branches -> Branch protection rules -> evolights/main ->
+#   "Require status checks to pass before merging" -> add "verify"
+
+on:
+  push:
+    branches: [evolights/main]
+  pull_request:
+    branches: [evolights/main]
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run integration verification
+        run: bash tools/verify-evolights-integration.sh

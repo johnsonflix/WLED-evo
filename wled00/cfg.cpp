@@ -1,6 +1,8 @@
 #include "wled.h"
 #include "wled_ethernet.h"
+// EVOLIGHTS-ANCHOR: include-auth-header
 #include "wled_cloud_auth.h"   // EvoLights: read/write evoauth section in wsec.json
+// EVOLIGHTS-ANCHOR: include-auth-header-end
 
 /*
  * Serializes and parses the cfg.json and wsec.json settings files, stored in internal FS.
@@ -1318,8 +1320,10 @@ bool deserializeConfigSec() {
   CJSON(aOtaEnabled, ota[F("aota")]);
   #endif
 
+  // EVOLIGHTS-ANCHOR: auth-read-wsec
   // EvoLights: load admin credentials and local-auth toggle from wsec.json.
   EvoAuth::readFromWsec(root);
+  // EVOLIGHTS-ANCHOR: auth-read-wsec-end
 
   releaseJSONBufferLock();
   return true;
@@ -1363,8 +1367,10 @@ void serializeConfigSec() {
   ota[F("aota")] = aOtaEnabled;
   #endif
 
+  // EVOLIGHTS-ANCHOR: auth-write-wsec
   // EvoLights: persist admin credentials and local-auth toggle.
   EvoAuth::writeToWsec(root);
+  // EVOLIGHTS-ANCHOR: auth-write-wsec-end
 
   File f = WLED_FS.open(FPSTR(s_wsec_json), "w");
   if (f) serializeJson(root, f);

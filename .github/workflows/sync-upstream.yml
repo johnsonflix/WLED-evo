@@ -61,10 +61,6 @@ jobs:
           git checkout evolights/main
           if git merge --no-ff --no-edit -m "chore: sync upstream WLED into evolights/main" main; then
             echo "result=clean" >> "$GITHUB_OUTPUT"
-            BRANCH="sync/upstream-$(date +%Y%m%d)"
-            git checkout -b "$BRANCH"
-            git push -u origin "$BRANCH"
-            echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
           else
             echo "result=conflict" >> "$GITHUB_OUTPUT"
             echo "files<<EOF" >> "$GITHUB_OUTPUT"
@@ -73,19 +69,50 @@ jobs:
             git merge --abort
           fi
 
-      - name: Open sync PR
+      # If git could merge cleanly, that proves no LINES collided — but it
+      # does NOT prove our hooks are still in the right place. Run the
+      # integration verifier on the merged tree before opening a PR. If it
+      # fails, the merge silently damaged us; abort the merge and open a
+      # damage issue instead of a PR.
+      - name: Verify integration on merged tree
+        id: verify
         if: steps.merge.outputs.result == 'clean'
+        run: |
+          set +e
+          bash tools/verify-evolights-integration.sh > /tmp/verify.log 2>&1
+          rc=$?
+          cat /tmp/verify.log
+          if [ "$rc" -ne 0 ]; then
+            {
+              echo "summary<<EOF"
+              # Trim to just the failure lines for the issue body.
+              grep -E "^\s*\[FAIL\]|EvoLights integration verification" /tmp/verify.log
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            echo "result=damaged" >> "$GITHUB_OUTPUT"
+            # Roll back the merge so evolights/main stays clean for next attempt.
+            git reset --hard HEAD~1
+          else
+            echo "result=ok" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push sync branch and open PR (clean merge + verify pass)
+        if: steps.merge.outputs.result == 'clean' && steps.verify.outputs.result == 'ok'
+        id: pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          BRANCH="sync/upstream-$(date +%Y%m%d)"
+          git checkout -b "$BRANCH"
+          git push -u origin "$BRANCH"
           gh pr create \
             --base evolights/main \
-            --head ${{ steps.merge.outputs.branch }} \
+            --head "$BRANCH" \
             --title "Sync upstream WLED $(date +%Y-%m-%d)" \
-            --body "Automated merge of upstream WLED \`main\` into \`evolights/main\`. EvoLights customizations were preserved without conflict. Review the diff and run firmware-build.yml to verify before merging." \
+            --body "Automated merge of upstream WLED \`main\` into \`evolights/main\`. EvoLights customizations were preserved without conflict and the integration verifier passed on the merged tree. Firmware build CI must still pass before merging." \
             || echo "PR may already exist"
 
-      - name: Open conflict issue
+      - name: Open conflict issue (git merge conflict)
         if: steps.merge.outputs.result == 'conflict'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -101,3 +128,26 @@ Resolve locally with:
 git fetch upstream && git checkout evolights/main && git merge main
 \`\`\`" \
             --label "sync-conflict"
+
+      - name: Open damage issue (silent merge damage)
+        if: steps.merge.outputs.result == 'clean' && steps.verify.outputs.result == 'damaged'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --title "Upstream WLED sync damaged EvoLights integration $(date +%Y-%m-%d)" \
+            --body "Git merged upstream WLED into \`evolights/main\` without line conflicts, BUT the integration verifier failed on the merged tree. Our hooks have been silently moved or removed. The merge has been rolled back; \`evolights/main\` is unchanged.
+
+Verifier output:
+\`\`\`
+${{ steps.verify.outputs.summary }}
+\`\`\`
+
+Reproduce locally:
+\`\`\`
+git fetch upstream && git checkout evolights/main && git merge main
+bash tools/verify-evolights-integration.sh
+\`\`\`
+
+Restore the missing/relocated hook(s), commit, and push. The verifier must pass before \`evolights/main\` accepts the upstream merge." \
+            --label "sync-damage"
