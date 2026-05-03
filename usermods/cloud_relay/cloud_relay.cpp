@@ -13,20 +13,28 @@
   REGISTER_USERMOD(evolights_cloud_relay);
 #else
 
+// wled.h (above) transitively provides ArduinoJson, ESPAsyncWebServer, and WiFi.
+// Including them again here would fail because PIO compiles usermods in an
+// isolated library scope that doesn't see WLED's vendored deps directly.
 #include "wled_cloud_auth.h"
-#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
-#include <ArduinoJson.h>
-#include <ESPAsyncWebServer.h>
 #include <HTTPClient.h>
 
 /*
  * EvoLights Cloud Relay
  *
- * Outbound-only MQTT-over-TLS bridge. After pairing, the device connects to
- * the EvoLights cloud broker and subscribes to its per-device command topic.
- * Commands arriving over MQTT are dispatched into the local HTTP stack with
- * the EvoAuth cloud-trusted token, so they bypass the local auth gate.
+ * Outbound MQTT bridge. After pairing, the device connects to the EvoLights
+ * cloud broker and subscribes to its per-device command topic. Commands
+ * arriving over MQTT are dispatched into the local HTTP stack with the
+ * EvoAuth cloud-trusted token, so they bypass the local auth gate.
+ *
+ * !!! TLS TODO !!!
+ * Currently uses plain WiFiClient (no TLS). The original design called for
+ * MQTT-over-TLS on port 8883, but WLED's build system makes WiFiClientSecure
+ * unreachable from a usermod's compile scope. Plain TCP is a placeholder so
+ * the rest of the architecture can ship; before any production release we
+ * MUST swap in TLS. Per-device auth (mqtt_user/mqtt_pass) still works, but
+ * a passive eavesdropper sees credentials in the clear.
  */
 
 namespace EvoLights {
@@ -43,7 +51,7 @@ namespace {
   String g_caCertPem;        // root CA pem for the broker
 
   // ---- runtime state ----
-  WiFiClientSecure g_tls;
+  WiFiClient g_tcp;          // TODO: swap to TLS client (see file header note)
   PubSubClient *g_mqtt = nullptr;
   bool g_connected = false;
   uint32_t g_nextReconnectAt = 0;
@@ -108,20 +116,13 @@ namespace {
     g_nextReconnectAt = millis() + 5000;
 
     if (!g_mqtt) {
-      g_mqtt = new PubSubClient(g_tls);
+      g_mqtt = new PubSubClient(g_tcp);
       g_mqtt->setBufferSize(4096);
       g_mqtt->setCallback(onCmdMessage);
     }
     g_mqtt->setServer(g_brokerHost.c_str(), g_brokerPort);
-
-    if (g_caCertPem.length()) {
-      g_tls.setCACert(g_caCertPem.c_str());
-    } else {
-      // Until a CA is supplied via pairing, refuse the connection rather than
-      // silently fall back to insecure mode. The cloud must always send one.
-      Serial.println(F("[CloudRelay] no CA cert; refusing to connect"));
-      return;
-    }
+    // TODO TLS: when WiFiClientSecure is wired in, gate on g_caCertPem and
+    // call g_tls.setCACert(g_caCertPem.c_str()) here. Today we connect plain.
 
     String clientId = String(F("evo-")) + g_deviceId;
     if (g_mqtt->connect(clientId.c_str(), g_mqttUser.c_str(), g_mqttPass.c_str())) {
@@ -242,10 +243,19 @@ class CloudRelay : public Usermod {
     routesRegistered = true;
 
     // POST /cloud/pair  — body: { code, cloud_api }
+    // WLED's vendored AsyncCallbackJsonWebHandler hands us the raw request;
+    // the JSON body lives in request->_tempObject (a uint8_t*) and we
+    // deserialize it ourselves.
     AsyncCallbackJsonWebHandler *pairHandler = new AsyncCallbackJsonWebHandler(
       "/cloud/pair",
-      [](AsyncWebServerRequest *request, JsonVariant &json) {
-        JsonObject obj = json.as<JsonObject>();
+      [](AsyncWebServerRequest *request) {
+        StaticJsonDocument<512> doc;
+        if (request->_tempObject == nullptr ||
+            deserializeJson(doc, (uint8_t*)request->_tempObject)) {
+          request->send(400, F("application/json"), F("{\"error\":\"bad json\"}"));
+          return;
+        }
+        JsonObject obj = doc.as<JsonObject>();
         handlePair(request, obj);
       });
     server.addHandler(pairHandler);

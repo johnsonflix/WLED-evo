@@ -1,6 +1,8 @@
 {
   "name": "EvoLightsCloudRelay",
-  "build": { "libArchive": false },
+  "build": {
+    "libArchive": false
+  },
   "dependencies": {
     "knolleary/PubSubClient": "^2.8"
   }
