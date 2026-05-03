@@ -30,7 +30,11 @@ static const char OTA_PUBKEY_B64[] PROGMEM =
   "q9G3Y5Dw2BYnhVdX2/DFsAF9xH52Jabf2i7tu2UKANI=";
 // EVOLIGHTS-ANCHOR: ota-pubkey-end
 
-const char OTA_PUBKEY_B64_MARKER[] = OTA_PUBKEY_B64;
+// Definition for the externally-visible marker declared in ota_verifier.h.
+// Points at the same PROGMEM bytes as OTA_PUBKEY_B64 so the verifier script
+// has a stable C symbol to grep for if it ever wants to reach across the
+// module from outside the anonymous namespace below.
+const char* const OTA_PUBKEY_B64_MARKER = OTA_PUBKEY_B64;
 
 namespace {
 

@@ -28,5 +28,5 @@ namespace EvoLights::OTA {
   bool processManifest(const char *json, size_t len);
 
   // For tools/verify-evolights-integration.sh to grep.
-  extern const char OTA_PUBKEY_B64_MARKER[];
+  extern const char* const OTA_PUBKEY_B64_MARKER;
 }
