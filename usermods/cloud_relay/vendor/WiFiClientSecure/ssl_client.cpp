@@ -161,11 +161,21 @@ int start_ssl_client(sslclient_context *ssl_client, const IPAddress& ip, uint32_
         return handle_error(ret);
     }
 
+    // EVOLIGHTS-LOCAL-PATCH: ALPN is optional. Tasmota's slimmed mbedtls
+    // build for framework-arduinoespressif32 v2.0.18 does not include
+    // mbedtls_ssl_conf_alpn_protocols, so referencing it makes the vendored
+    // ssl_client.cpp fail to compile even though we never set ALPN. Guard the
+    // call site behind MBEDTLS_SSL_ALPN (the upstream mbedtls feature flag);
+    // when it's not defined, skip the call and log a warning.
     if (alpn_protos != NULL) {
+#if defined(MBEDTLS_SSL_ALPN)
         log_v("Setting ALPN protocols");
         if ((ret = mbedtls_ssl_conf_alpn_protocols(&ssl_client->ssl_conf, alpn_protos) ) != 0) {
             return handle_error(ret);
         }
+#else
+        log_w("ALPN requested but mbedtls was built without MBEDTLS_SSL_ALPN; ignoring");
+#endif
     }
 
     // MBEDTLS_SSL_VERIFY_REQUIRED if a CA certificate is defined on Arduino IDE and
