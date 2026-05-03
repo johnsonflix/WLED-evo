@@ -908,14 +908,58 @@ subscriber that verifies and applies is on a feature branch
 receives the manifest, but does nothing with it until that branch
 lands. **Resolution:** finish, review, and merge the branch.
 
-### 14.3 No admin web UI
+### 14.3 Admin web UI
 
-**Status:** all `/v1/admin/*` endpoints exist but you operate them via
-curl / Postman / a thin internal tool of your own choosing. **Impact:**
-admin operations require a JWT plus a willingness to use a CLI.
-**Resolution:** build a small admin SPA (React/Svelte/HTMX, doesn't
-matter), gate it behind a CORS allowlist for the operator's office /
-VPN. Out of scope for v1 ship.
+**Status:** shipped. The cloud repo now contains a Next.js 15 operator
+console under `admin/`, packaged as a docker-compose service alongside
+the api / postgres / mosquitto trio.
+
+**Access:** the `admin` service exposes port 3000. Front it with a
+reverse proxy at a hostname of your choice (e.g. `admin.evolights.io`):
+
+```Caddyfile
+admin.evolights.io {
+  reverse_proxy localhost:3000
+}
+```
+
+The container talks to the api over the internal docker network
+(`API_BASE_URL=http://api:8080`), so the admin UI does not require any
+Stripe / OTA / email secrets in its own environment — it never reads
+them, only displays the boolean "is configured" flags returned by
+`GET /v1/admin/settings`.
+
+**Bootstrap your first admin** the same way as before — the admin UI is
+gated by `users.is_admin` and there's no self-promote path:
+
+```bash
+docker compose exec api npm run admin:promote -- you@evolights.io
+```
+
+Then open `https://admin.evolights.io` (or `http://localhost:3000`
+direct), log in with your normal email + password, and the dashboard
+appears. If the account isn't an admin you'll be bounced back to
+`/login` with a clear "admin only" message.
+
+**What the UI covers:**
+
+- Dashboard: live counts (users / devices / active subs / MRR estimate /
+  24h signups + pairings) from `/v1/admin/stats`.
+- Users: paginated list with email substring search; per-user detail
+  with promote / demote / logout-everywhere / soft-delete buttons.
+- Devices: cross-tenant fleet view with name / hardware-id / owner-email
+  search.
+- Stripe: list + create for products, prices, coupons (wraps the same
+  endpoints the deployment doc shows being curl'd).
+- Firmware: list of published manifests + a publish form that POSTs to
+  `/v1/ota/firmwares` (so you can roll a release without curl).
+- Settings: read-only env-config summary so you can verify what the api
+  process actually sees without `docker compose exec api env`.
+
+**Security model:** the JWT lives in an HttpOnly cookie set by Next.js
+Server Actions; client JS never sees the token. CSRF is handled
+natively by the Server Action runtime (action-id validation). Set
+`NODE_ENV=production` so the Secure cookie attribute kicks in.
 
 ### 14.4 No OTA release-engineer co-signature
 
