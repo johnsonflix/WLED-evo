@@ -149,8 +149,11 @@ namespace {
       g_mqtt->setBufferSize(4096);
       g_mqtt->setCallback(onCmdMessage);
     }
-    // Pin the broker's root CA. setCACert() in WiFiClientSecure copies the
-    // PEM internally, so it's safe even though g_caCertPem may later change.
+    // Pin the broker's root CA. WiFiClientSecure::setCACert stores the
+    // pointer (not a copy), so the storage must outlive the TLS session.
+    // g_caCertPem is in the file-static anonymous namespace and only ever
+    // reassigned by handlePair() / disconnectAndForget(), which run on the
+    // same WLED main loop as connectMqtt() — there is no concurrent mutator.
     g_tls.setCACert(g_caCertPem.c_str());
     g_mqtt->setServer(g_brokerHost.c_str(), g_brokerPort);
 
