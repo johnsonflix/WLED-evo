@@ -10,8 +10,7 @@ notably WLED usermods. Without this, a usermod that does
     #include <WiFiClientSecure.h>
 
 fails with "No such file or directory" because PIO compiles each usermod as an
-isolated library whose CPPPATH does not see the framework's libraries/<lib>/src
-directories.
+isolated library whose CPPPATH does not see the framework's libraries dirs.
 
 The companion patch in pio-scripts/load_usermods.py prepends those dirs to each
 usermod's per-lib CPPPATH, which works for some PIO versions but proved
@@ -39,10 +38,28 @@ CANDIDATE_PACKAGES = (
     "framework-arduino-mbed",
 )
 
+# Headers we MUST be able to resolve from a usermod compile context. If any of
+# these is found anywhere under the framework package, its containing dir is
+# added to the env's include path. Catches headers that don't live under the
+# canonical libraries/<lib>/src layout (slimmed-down distributions, ESP-IDF
+# re-orgs, etc).
+REQUIRED_HEADERS = (
+    "WiFiClientSecure.h",
+    "HTTPClient.h",
+    "Update.h",
+    "WiFi.h",
+    "WiFiClient.h",
+)
 
-def _enumerate_library_include_dirs() -> list[str]:
-    """Return [<framework-pkg>/libraries/<lib>/{src or .}] for every bundled lib."""
-    pkg_dirs: list[str] = []
+
+def _enumerate_library_include_dirs():
+    """Return (include_dirs, located).
+
+    include_dirs: deduplicated list of dirs to expose
+    located: dict mapping each REQUIRED_HEADERS entry to the list of paths
+             where it was found (empty list = MISSING)
+    """
+    pkg_dirs = []
 
     # 1) Ask the platform — works in normal PIO subenvs.
     try:
@@ -69,25 +86,47 @@ def _enumerate_library_include_dirs() -> list[str]:
                 if cand.is_dir():
                     pkg_dirs.append(str(cand))
 
-    include_dirs: list[str] = []
+    seen = set()
+    include_dirs = []
+    located = {h: [] for h in REQUIRED_HEADERS}
+
+    def _add(d):
+        s = str(d)
+        if s not in seen:
+            seen.add(s)
+            include_dirs.append(s)
+
     for pkg_dir in pkg_dirs:
-        libraries_root = Path(pkg_dir) / "libraries"
-        if not libraries_root.is_dir():
-            continue
-        for lib_dir in sorted(libraries_root.iterdir()):
-            if not lib_dir.is_dir():
-                continue
-            src = lib_dir / "src"
-            if src.is_dir():
-                include_dirs.append(str(src))
-                continue
-            if any(lib_dir.glob("*.h")):
-                include_dirs.append(str(lib_dir))
-    return include_dirs
+        pkg_path = Path(pkg_dir)
+
+        # Tier A — documented Arduino libraries layout.
+        libraries_root = pkg_path / "libraries"
+        if libraries_root.is_dir():
+            for lib_dir in sorted(libraries_root.iterdir()):
+                if not lib_dir.is_dir():
+                    continue
+                src = lib_dir / "src"
+                if src.is_dir():
+                    _add(src)
+                    continue
+                if any(lib_dir.glob("*.h")):
+                    _add(lib_dir)
+
+        # Tier B — find REQUIRED headers anywhere under the package and add
+        # their containing dir. rglob is O(files) but runs once at configure.
+        for header in REQUIRED_HEADERS:
+            try:
+                for hit in pkg_path.rglob(header):
+                    located[header].append(str(hit))
+                    _add(hit.parent)
+            except Exception:
+                pass
+
+    return include_dirs, located
 
 
 def _apply():
-    dirs = _enumerate_library_include_dirs()
+    dirs, located = _enumerate_library_include_dirs()
     if not dirs:
         secho(
             "expose_framework_libs.py: no framework library include dirs found "
@@ -109,17 +148,23 @@ def _apply():
     flags = ["-I" + d for d in dirs]
     env.Append(CCFLAGS=flags, CXXFLAGS=flags, ASFLAGS=flags)  # noqa: F821
 
-    # Mention WiFiClientSecure explicitly when it lands so build logs show it.
-    has_secure = any(d.endswith(("WiFiClientSecure/src", "WiFiClientSecure\\src"))
-                     or Path(d).name == "src" and Path(d).parent.name == "WiFiClientSecure"
-                     for d in dirs)
     secho(
-        f"expose_framework_libs.py: exposed {len(dirs)} framework library include "
-        f"dir(s) to env '{env['PIOENV']}'"  # noqa: F821
-        f" (WiFiClientSecure: {'yes' if has_secure else 'NO'})",
+        "expose_framework_libs.py: exposed {} framework include dir(s) to env '{}'".format(
+            len(dirs), env['PIOENV']  # noqa: F821
+        ),
         fg="cyan",
         err=True,
     )
+    for header, hits in located.items():
+        if hits:
+            for h in hits:
+                secho("  found {} -> {}".format(header, h), fg="cyan", err=True)
+        else:
+            secho(
+                "  MISSING {} — not found anywhere under framework pkg".format(header),
+                fg="yellow",
+                err=True,
+            )
 
 
 _apply()
