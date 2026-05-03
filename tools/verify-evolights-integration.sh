@@ -60,6 +60,11 @@ declare -A ANCHORS=(
   ["auth-read-wsec:wled00/cfg.cpp"]=1
   ["auth-write-wsec:wled00/cfg.cpp"]=1
   ["env-evolights:platformio.ini"]=1
+  # TLS via stock platform (PR feat/firmware-tls-via-platform-switch): the
+  # *_evolights envs override platform = espressif32 @ 6.x to get real
+  # mbedtls + WiFiClientSecure. The Tasmota slim framework strips both,
+  # so dropping this anchor silently regresses the cloud relay back to plaintext.
+  ["platform-stock-espressif32:platformio.ini"]=1
   # Critical-finding fixes (PR fix/firmware-criticals): each invariant below
   # corresponds to a specific security regression we don't want silently
   # reintroduced by a future merge.
@@ -145,6 +150,46 @@ fi
 # Without this, a signed older manifest can be replayed to roll back security fixes.
 require_in_file usermods/cloud_relay/ota_verifier.cpp 'manifestVer <= currentVer' \
   "ota_verifier.cpp enforces downgrade protection (manifestVer > currentVer)"
+
+# ---------------------------------------------------------------------
+# TLS positive guards. These FAIL if anyone silently regresses the cloud
+# relay back to plaintext MQTT — they're the structural twin of
+# "platform-stock-espressif32" anchor in platformio.ini and exist because a
+# build can succeed (with WiFiClient instead of WiFiClientSecure) and still
+# be silently broken in production.
+# ---------------------------------------------------------------------
+require_in_file platformio.ini 'platform[[:space:]]*=[[:space:]]*espressif32[[:space:]]*@' \
+  "platformio.ini: evolights_common pins stock espressif32 platform"
+
+require_in_file usermods/cloud_relay/cloud_relay.cpp '^[[:space:]]*#include[[:space:]]+<WiFiClientSecure\.h>' \
+  "cloud_relay.cpp includes <WiFiClientSecure.h> (real TLS)"
+require_in_file usermods/cloud_relay/cloud_relay.cpp 'WiFiClientSecure[[:space:]]+g_tls' \
+  "cloud_relay.cpp declares WiFiClientSecure g_tls"
+require_in_file usermods/cloud_relay/cloud_relay.cpp 'g_tls\.setCACert\(' \
+  "cloud_relay.cpp pins broker CA via g_tls.setCACert(...)"
+require_in_file usermods/cloud_relay/cloud_relay.cpp 'new[[:space:]]+PubSubClient\(g_tls\)' \
+  "cloud_relay.cpp wires PubSubClient onto the TLS transport"
+
+# cloud_relay must NEVER call setInsecure(); the broker connection always
+# verifies the pinned CA. (The OTA verifier is allowed to use setInsecure()
+# because the Ed25519 signature is the trust anchor for what gets flashed —
+# see EVOLIGHTS-ANCHOR: ota-trust-model.)
+#
+# Match a real call (identifier or .)setInsecure( at the start of a code
+# token, ignoring lines that are pure block-comment continuations (* …) or
+# C++ line comments (// …) — the file's own header documents that we DON'T
+# call this, and we don't want that doc to trip the check.
+if grep -nE '(\.|->|::)setInsecure\(' usermods/cloud_relay/cloud_relay.cpp \
+   | grep -vE '^[[:digit:]]+:[[:space:]]*(\*|//)' >/dev/null; then
+  fail "cloud_relay.cpp must not call setInsecure() (broker CA must be pinned)"
+else
+  ok "cloud_relay.cpp does not call setInsecure() (broker CA pinning intact)"
+fi
+
+require_in_file usermods/cloud_relay/ota_verifier.cpp '^[[:space:]]*#include[[:space:]]+<WiFiClientSecure\.h>' \
+  "ota_verifier.cpp includes <WiFiClientSecure.h> (HTTPS artifact download)"
+require_in_file usermods/cloud_relay/ota_verifier.cpp 'WiFiClientSecure[[:space:]]+client' \
+  "ota_verifier.cpp uses WiFiClientSecure for the artifact transport"
 
 # ---------------------------------------------------------------------
 # 4. Ordering invariant — the AuthGate MUST be registered before usermod
