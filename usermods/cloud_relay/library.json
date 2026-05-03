@@ -10,7 +10,9 @@
     ],
     "includeDir": ".",
     "flags": [
-      "-I./vendor/WiFiClientSecure"
+      "-I./vendor/WiFiClientSecure",
+      "-DMBEDTLS_KEY_EXCHANGE_SOME_PSK_ENABLED",
+      "-DMBEDTLS_KEY_EXCHANGE__SOME__PSK_ENABLED"
     ]
   },
   "dependencies": {
