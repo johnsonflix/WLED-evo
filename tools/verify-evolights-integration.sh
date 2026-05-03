@@ -58,6 +58,17 @@ declare -A ANCHORS=(
   ["auth-read-wsec:wled00/cfg.cpp"]=1
   ["auth-write-wsec:wled00/cfg.cpp"]=1
   ["env-evolights:platformio.ini"]=1
+  # Build glue that lets usermods #include framework headers like
+  # <WiFiClientSecure.h>. Without this patch, cloud_relay's TLS code goes back
+  # to "WiFiClientSecure.h: No such file or directory" at compile time.
+  ["usermod-framework-includes:pio-scripts/load_usermods.py"]=1
+  ["usermod-framework-includes-apply:pio-scripts/load_usermods.py"]=1
+  # TLS for the cloud relay MQTT transport. If any of these go missing, the
+  # device has either dropped TLS entirely, stopped pinning the CA, or stopped
+  # failing closed when no CA cert is provisioned.
+  ["cloud-relay-tls-client:usermods/cloud_relay/cloud_relay.cpp"]=1
+  ["cloud-relay-tls-fail-closed:usermods/cloud_relay/cloud_relay.cpp"]=1
+  ["cloud-relay-tls-pin-ca:usermods/cloud_relay/cloud_relay.cpp"]=1
 )
 
 for key in "${!ANCHORS[@]}"; do
@@ -101,6 +112,34 @@ require_in_file wled00/cfg.cpp '^[[:space:]]*EvoAuth::writeToWsec\(root\);' "cfg
 
 require_in_file usermods/cloud_relay/cloud_relay.cpp 'REGISTER_USERMOD' \
   "cloud_relay registers itself via REGISTER_USERMOD"
+
+# TLS invariants — these encode the security promise: real WiFiClientSecure,
+# real CA pinning, real fail-closed when no CA is on file. None of these may
+# silently regress to plaintext or setInsecure().
+require_in_file usermods/cloud_relay/cloud_relay.cpp '#include <WiFiClientSecure\.h>' \
+  "cloud_relay includes <WiFiClientSecure.h>"
+require_in_file usermods/cloud_relay/cloud_relay.cpp 'WiFiClientSecure[[:space:]]+g_tls' \
+  "cloud_relay declares a WiFiClientSecure transport (g_tls)"
+require_in_file usermods/cloud_relay/cloud_relay.cpp 'g_tls\.setCACert\(' \
+  "cloud_relay pins the CA cert via setCACert()"
+require_in_file usermods/cloud_relay/cloud_relay.cpp 'new PubSubClient\(g_tls\)' \
+  "cloud_relay's PubSubClient sits on top of WiFiClientSecure"
+# Hard guard: setInsecure() must NOT appear as a live call. If anyone is
+# tempted to silence a TLS error by switching to setInsecure(), this catches
+# the regression at verifier time before it ships. We match a real call (a
+# leading identifier-or-`.` followed by setInsecure) rather than the bare
+# token, so doc comments that mention the function name don't trip the guard.
+if grep -qE '(^|[^/A-Za-z_])(\.|->)setInsecure[[:space:]]*\(' usermods/cloud_relay/cloud_relay.cpp; then
+  fail "cloud_relay.cpp uses setInsecure() — TLS validation is disabled, refusing to ship"
+else
+  ok "cloud_relay.cpp does not call setInsecure() (TLS validation is enforced)"
+fi
+# And we never want plain WiFiClient as the MQTT transport again.
+if grep -qE 'new PubSubClient\(g_tcp\)|PubSubClient[[:space:]]*\([[:space:]]*WiFiClient[^S]' usermods/cloud_relay/cloud_relay.cpp; then
+  fail "cloud_relay.cpp wires PubSubClient over plain WiFiClient — TLS bypassed"
+else
+  ok "cloud_relay.cpp does not wire PubSubClient over plain WiFiClient"
+fi
 
 # EvoLights envs in platformio.ini — what firmware-build.yml builds.
 require_in_file platformio.ini '^\[env:esp32dev_evolights\]'             "platformio.ini: env esp32dev_evolights defined"

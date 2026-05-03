@@ -16,9 +16,12 @@
 // wled.h (above) transitively provides ArduinoJson, ESPAsyncWebServer, and WiFi.
 // Including them again here would fail because PIO compiles usermods in an
 // isolated library scope that doesn't see WLED's vendored deps directly.
+// <WiFiClientSecure.h> and <HTTPClient.h> are reachable thanks to the
+// EVOLIGHTS-ANCHOR: usermod-framework-includes patch in pio-scripts/load_usermods.py.
 #include "wled_cloud_auth.h"
 #include <PubSubClient.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 
 /*
  * EvoLights Cloud Relay
@@ -28,13 +31,12 @@
  * arriving over MQTT are dispatched into the local HTTP stack with the
  * EvoAuth cloud-trusted token, so they bypass the local auth gate.
  *
- * !!! TLS TODO !!!
- * Currently uses plain WiFiClient (no TLS). The original design called for
- * MQTT-over-TLS on port 8883, but WLED's build system makes WiFiClientSecure
- * unreachable from a usermod's compile scope. Plain TCP is a placeholder so
- * the rest of the architecture can ship; before any production release we
- * MUST swap in TLS. Per-device auth (mqtt_user/mqtt_pass) still works, but
- * a passive eavesdropper sees credentials in the clear.
+ * Transport: MQTT over TLS on port 8883 (default). The CA root used to
+ * validate the broker certificate is delivered by the cloud at pair time
+ * and persisted in wsec.json (g_caCertPem). We FAIL CLOSED — if no CA cert
+ * is on file we refuse to connect rather than fall back to plaintext or
+ * setInsecure(); that policy preserves the original guarantee that on-wire
+ * MQTT credentials are never exposed.
  */
 
 namespace EvoLights {
@@ -51,7 +53,11 @@ namespace {
   String g_caCertPem;        // root CA pem for the broker
 
   // ---- runtime state ----
-  WiFiClient g_tcp;          // TODO: swap to TLS client (see file header note)
+  // TLS transport. We pin the CA cert delivered at pair time via setCACert().
+  // EVOLIGHTS-ANCHOR: cloud-relay-tls-client
+  WiFiClientSecure g_tls;
+  bool g_tlsCaInstalled = false;
+  // EVOLIGHTS-ANCHOR: cloud-relay-tls-client-end
   PubSubClient *g_mqtt = nullptr;
   bool g_connected = false;
   uint32_t g_nextReconnectAt = 0;
@@ -115,14 +121,29 @@ namespace {
     if (millis() < g_nextReconnectAt) return;
     g_nextReconnectAt = millis() + 5000;
 
+    // FAIL CLOSED: refuse to connect without a CA cert. We never silently use
+    // setInsecure() — a misconfigured device should be loud, not eavesdropped.
+    // EVOLIGHTS-ANCHOR: cloud-relay-tls-fail-closed
+    if (g_caCertPem.length() == 0) {
+      Serial.println(F("[CloudRelay] refusing to connect: no CA cert on file (re-pair to provision)"));
+      g_nextReconnectAt = millis() + 60000;  // back off; pairing will reset this
+      return;
+    }
+    // EVOLIGHTS-ANCHOR: cloud-relay-tls-fail-closed-end
+
+    if (!g_tlsCaInstalled) {
+      // EVOLIGHTS-ANCHOR: cloud-relay-tls-pin-ca
+      g_tls.setCACert(g_caCertPem.c_str());
+      g_tlsCaInstalled = true;
+      // EVOLIGHTS-ANCHOR: cloud-relay-tls-pin-ca-end
+    }
+
     if (!g_mqtt) {
-      g_mqtt = new PubSubClient(g_tcp);
+      g_mqtt = new PubSubClient(g_tls);
       g_mqtt->setBufferSize(4096);
       g_mqtt->setCallback(onCmdMessage);
     }
     g_mqtt->setServer(g_brokerHost.c_str(), g_brokerPort);
-    // TODO TLS: when WiFiClientSecure is wired in, gate on g_caCertPem and
-    // call g_tls.setCACert(g_caCertPem.c_str()) here. Today we connect plain.
 
     String clientId = String(F("evo-")) + g_deviceId;
     if (g_mqtt->connect(clientId.c_str(), g_mqttUser.c_str(), g_mqttPass.c_str())) {
@@ -148,6 +169,7 @@ namespace {
   void disconnectAndForget() {
     if (g_mqtt && g_mqtt->connected()) g_mqtt->disconnect();
     g_connected = false;
+    g_tlsCaInstalled = false;  // force fresh setCACert() after re-pair
     EvoAuth::setCloudBypassEnabled(false);
     g_brokerHost = ""; g_brokerPort = 8883;
     g_deviceId = ""; g_mqttUser = ""; g_mqttPass = ""; g_caCertPem = "";
@@ -201,6 +223,7 @@ namespace {
     g_mqttPass    = doc["mqtt_pass"].as<String>();
     g_caCertPem   = doc["ca_cert"].as<String>();
     g_enabled     = true;
+    g_tlsCaInstalled = false;  // CA changed; force re-pin on next connect
     serializeConfigSec();
     g_nextReconnectAt = 0; // try connecting on next loop tick
 
