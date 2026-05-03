@@ -38,6 +38,8 @@ for f in \
   wled00/wled_cloud_auth.cpp \
   usermods/cloud_relay/cloud_relay.cpp \
   usermods/cloud_relay/library.json \
+  usermods/cloud_relay/ota_verifier.h \
+  usermods/cloud_relay/ota_verifier.cpp \
 ; do
   if [[ -f "$f" ]]; then ok "$f"
   else fail "missing: $f"
@@ -70,6 +72,12 @@ declare -A ANCHORS=(
   ["cookie-parse-anchored:wled00/wled_cloud_auth.cpp"]=1
   ["login-timing-oracle-verify:wled00/wled_cloud_auth.cpp"]=1
   ["pbkdf2-iters:wled00/wled_cloud_auth.h"]=1
+  # OTA verifier (PR feat/firmware-signed-ota): pubkey present + downgrade
+  # protection in code + trust-model comment block. Without these, signed-OTA
+  # silently regresses to "any signed manifest gets flashed".
+  ["ota-pubkey:usermods/cloud_relay/ota_verifier.cpp"]=1
+  ["ota-downgrade-protection:usermods/cloud_relay/ota_verifier.cpp"]=1
+  ["ota-trust-model:usermods/cloud_relay/ota_verifier.cpp"]=1
 )
 
 for key in "${!ANCHORS[@]}"; do
@@ -118,6 +126,25 @@ require_in_file usermods/cloud_relay/cloud_relay.cpp 'REGISTER_USERMOD' \
 require_in_file platformio.ini '^\[env:esp32dev_evolights\]'             "platformio.ini: env esp32dev_evolights defined"
 require_in_file platformio.ini '^\[env:esp32_eth_evolights\]'            "platformio.ini: env esp32_eth_evolights defined"
 require_in_file platformio.ini '^\[env:esp32s3dev_8MB_qspi_evolights\]'  "platformio.ini: env esp32s3dev_8MB_qspi_evolights defined"
+
+# OTA verifier wiring — cloud_relay must dispatch /ota MQTT messages to the verifier.
+require_in_file usermods/cloud_relay/cloud_relay.cpp '#include "ota_verifier\.h"' \
+  "cloud_relay includes ota_verifier.h"
+require_in_file usermods/cloud_relay/cloud_relay.cpp 'EvoLights::OTA::processManifest' \
+  "cloud_relay dispatches /ota MQTT messages to OTA::processManifest"
+
+# OTA pubkey is non-empty (catch the case where someone removed the key bytes
+# but left the constant declaration).
+if grep -qE '^[[:space:]]*"[A-Za-z0-9+/=]{40,}"' usermods/cloud_relay/ota_verifier.cpp; then
+  ok "ota_verifier.cpp: OTA_PUBKEY_B64 has a non-empty base64 value"
+else
+  fail "ota_verifier.cpp: OTA_PUBKEY_B64 is empty or malformed"
+fi
+
+# OTA downgrade protection: code MUST refuse manifests where manifestVer <= currentVer.
+# Without this, a signed older manifest can be replayed to roll back security fixes.
+require_in_file usermods/cloud_relay/ota_verifier.cpp 'manifestVer <= currentVer' \
+  "ota_verifier.cpp enforces downgrade protection (manifestVer > currentVer)"
 
 # ---------------------------------------------------------------------
 # 4. Ordering invariant — the AuthGate MUST be registered before usermod
