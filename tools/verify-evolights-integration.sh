@@ -59,10 +59,15 @@ declare -A ANCHORS=(
   ["auth-write-wsec:wled00/cfg.cpp"]=1
   ["env-evolights:platformio.ini"]=1
   # Build glue that lets usermods #include framework headers like
-  # <WiFiClientSecure.h>. Without this patch, cloud_relay's TLS code goes back
+  # <WiFiClientSecure.h>. Without these, cloud_relay's TLS code goes back
   # to "WiFiClientSecure.h: No such file or directory" at compile time.
+  # Two layers (belt + suspenders): the env-scope script injects -I flags into
+  # the env's CCFLAGS so every compile in the env sees them; the per-lib hook
+  # in load_usermods.py is the fallback that prepends to each usermod's CPPPATH.
   ["usermod-framework-includes:pio-scripts/load_usermods.py"]=1
   ["usermod-framework-includes-apply:pio-scripts/load_usermods.py"]=1
+  ["expose-framework-libs:pio-scripts/expose_framework_libs.py"]=1
+  ["evolights-extra-scripts:platformio.ini"]=1
   # TLS for the cloud relay MQTT transport. If any of these go missing, the
   # device has either dropped TLS entirely, stopped pinning the CA, or stopped
   # failing closed when no CA cert is provisioned.
