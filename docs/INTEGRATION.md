@@ -67,15 +67,22 @@ see Section 5.4.
 
 ### 1.1 Production base URLs
 
-The defaults the cloud falls back to when env is unset:
+The defaults the cloud falls back to when neither the runtime setting nor the
+env var is set:
 
-| Surface          | Default                                        | Configured by                |
-|------------------|------------------------------------------------|------------------------------|
-| Cloud API base   | `https://api.evolights.io`                     | `PUBLIC_API_URL` env         |
-| Web app          | `https://app.evolights.io`                     | `PUBLIC_WEB_URL` env         |
-| MQTT broker host | `mqtt.evolights.io`                            | `MQTT_PUBLIC_HOST` env       |
-| MQTT broker port | `8883` (TLS, public)                           | `MQTT_PUBLIC_PORT` env       |
-| Custom URL scheme| `evolights://`                                 | iOS app must register        |
+| Surface          | Default                                        | Configured by                                                       |
+|------------------|------------------------------------------------|---------------------------------------------------------------------|
+| Cloud API base   | `https://api.evolights.io`                     | Admin UI → Settings → Public → Public API URL (or `PUBLIC_API_URL`) |
+| Web app          | `https://app.evolights.io`                     | Admin UI → Settings → Public → Public web URL (or `PUBLIC_WEB_URL`) |
+| MQTT broker host | `mqtt.evolights.io`                            | Admin UI → Settings → Public → MQTT broker hostname (or `MQTT_PUBLIC_HOST`) |
+| MQTT broker port | `8883` (TLS, public)                           | Admin UI → Settings → Public → MQTT broker port (or `MQTT_PUBLIC_PORT`) |
+| Custom URL scheme| `evolights://`                                 | iOS app must register                                               |
+
+> Operator note: env vars are first-boot defaults only. Once the api is up,
+> the admin UI's Settings page is the source of truth — values stored in the
+> `app_settings` table override the matching env var. No iOS-app changes are
+> required when an operator rotates these; the same `/v1/me`, `/v1/devices`,
+> `/v1/devices/redeem`, etc. endpoints respond with the current values.
 
 > ⚠ These hostnames are placeholders the operator may not have stood up yet.
 > Treat them as "fill these in at app launch / settings" — the SwiftUI app
