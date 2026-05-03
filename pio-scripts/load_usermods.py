@@ -39,28 +39,47 @@ def _framework_library_include_dirs(xenv):
   behavior, which is at worst a regression from previous behavior.
   """
   dirs: list[str] = []
-  try:
-    platform = xenv.PioPlatform()
-  except Exception:
-    return dirs
 
-  # The package names that ship Arduino-style <Foo.h>/Foo/src/Foo.h libraries
-  # we care about. ESP32 Arduino lives under framework-arduinoespressif32;
-  # ESP8266 under framework-arduinoespressif8266. We also include the
-  # underlying ESP-IDF and toolsbase packages opportunistically — their
-  # libraries dir is structured the same way when present.
+  # Try several strategies to find the framework package dir. Different PIO
+  # versions / SCons subenvs expose this in different places.
   candidate_packages = (
     "framework-arduinoespressif32",
     "framework-arduinoespressif8266",
     "framework-arduino-mbed",
   )
-  for pkg in candidate_packages:
+
+  package_dirs: list[str] = []
+
+  # Strategy 1: ask PioPlatform on whatever env we got handed.
+  for src_env in (xenv, env):
     try:
-      pkg_dir = platform.get_package_dir(pkg)
+      platform = src_env.PioPlatform()
     except Exception:
-      pkg_dir = None
-    if not pkg_dir:
       continue
+    for pkg in candidate_packages:
+      try:
+        pkg_dir = platform.get_package_dir(pkg)
+      except Exception:
+        pkg_dir = None
+      if pkg_dir:
+        package_dirs.append(pkg_dir)
+    if package_dirs:
+      break
+
+  # Strategy 2: fall back to walking PROJECT_PACKAGES_DIR ourselves.
+  # ($HOME/.platformio/packages by default, or whatever core_dir is set to).
+  if not package_dirs:
+    try:
+      packages_dir = xenv.subst("$PROJECT_PACKAGES_DIR")
+    except Exception:
+      packages_dir = None
+    if packages_dir and Path(packages_dir).is_dir():
+      for pkg in candidate_packages:
+        candidate = Path(packages_dir) / pkg
+        if candidate.is_dir():
+          package_dirs.append(str(candidate))
+
+  for pkg_dir in package_dirs:
     libraries_root = Path(pkg_dir) / "libraries"
     if not libraries_root.is_dir():
       continue
@@ -75,6 +94,14 @@ def _framework_library_include_dirs(xenv):
       # Flat layout: <lib>/<lib>.h alongside other sources
       if any(lib_dir.glob("*.h")):
         dirs.append(str(lib_dir))
+
+  if dirs:
+    secho(f"load_usermods.py: exposing {len(dirs)} framework library include dir(s) to usermods",
+          fg="cyan", err=True)
+  else:
+    secho("load_usermods.py: WARNING — no framework library include dirs found; "
+          "usermods will not be able to #include <WiFiClientSecure.h> etc.",
+          fg="yellow", err=True)
   return dirs
 # EVOLIGHTS-ANCHOR: usermod-framework-includes-end
 
