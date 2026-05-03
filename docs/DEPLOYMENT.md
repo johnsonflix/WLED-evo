@@ -398,16 +398,24 @@ failure modes:
    - Re-create the same product + price (Stripe does NOT share these
      between modes). Copy the new `price_live_...` ID.
    - Re-create the webhook endpoint. Get a new `whsec_live_...` secret.
-3. Edit `.env`:
+3. Update credentials. `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` stay
+   in `.env` (they're genuine deploy-time secrets), so edit those there and
+   restart the api. `STRIPE_PRICE_ID_MONTHLY` is now a runtime setting:
+   either edit it in the admin UI (Settings → Stripe → Default monthly price
+   ID) or, on first boot, leave the env value as the default.
+
+   `.env`:
    ```
    STRIPE_SECRET_KEY=sk_live_...
    STRIPE_WEBHOOK_SECRET=whsec_live_...
-   STRIPE_PRICE_ID_MONTHLY=price_live_...
+   # STRIPE_PRICE_ID_MONTHLY can stay as the test value here; admin UI override wins.
    ```
-4. Restart the API:
+4. Restart the API to pick up the new keys:
    ```bash
    docker compose up -d api
    ```
+   Then log into the admin UI and set Stripe → Default monthly price ID to
+   the live `price_live_...` value. No further restart required.
 5. Test with a **real** card on a personal account. Verify:
    - The card was charged (Stripe Dashboard → Payments).
    - `/v1/me` shows `sub_status: active`.
@@ -432,7 +440,18 @@ Pick a provider — SendGrid, AWS SES, Mailgun, Postmark, your own server,
 or even a Gmail account with an App Password. Get host, port, username,
 password.
 
-In `.env`:
+Two options to apply the config:
+
+**Recommended (no restart):** log into the admin UI → Settings → Email and
+fill in Provider=`smtp`, From, SMTP host/port/secure/user/password. Saving
+the form invalidates the in-process email transporter; the next
+`/v1/auth/forgot-password` rebuilds and verifies it. Failures show up in
+the api log as `smtp verify failed — email disabled` and the user just
+gets the always-202 response (no email).
+
+**First-boot bootstrap:** if you'd rather seed via env, set the same values
+in `.env` then restart the api once. The admin UI overrides anything in
+`.env`, so you only need this for fresh installs.
 
 ```
 EMAIL_PROVIDER=smtp
@@ -443,10 +462,6 @@ SMTP_SECURE=false        # true for port 465 (implicit TLS), false for 587 (STAR
 SMTP_USER=apikey         # SendGrid uses the literal string "apikey"
 SMTP_PASS=<your SendGrid API key>
 ```
-
-Restart the api. On boot it runs `transporter.verify()` — if SMTP is
-broken you'll see `smtp verify failed — email disabled` in the log
-(the API stays up, but email features 503 until you fix it).
 
 ### 6.2 Microsoft Graph (if you're already in Microsoft 365)
 
@@ -973,40 +988,46 @@ device-attestation cert. Out of scope.
 
 ## Appendix A — Quick reference: all environment variables
 
-| Var | Required | Notes |
-|---|---|---|
-| `NODE_ENV` | rec. | `production` in prod |
-| `PORT` | rec. | Default 8080 |
-| `JWT_SECRET` | **yes** | ≥32 chars; rotation logs everyone out |
-| `PAIRING_CODE_TTL_SECONDS` | no | Default 300 (5 min) |
-| `PUBLIC_WEB_URL` | rec. | Used in password-reset emails |
-| `PUBLIC_API_URL` | rec. | Returned in `/v1/pairing/codes` for devices to call |
-| `POSTGRES_*` | **yes** |  |
-| `DATABASE_URL` | **yes** | Must match the POSTGRES_* values |
-| `MQTT_URL` | **yes** | `mqtt://mosquitto:1883` (internal) |
-| `MQTT_API_USERNAME` / `_PASSWORD` | **yes** | Cloud's broker creds; must exist in `passwd` |
-| `MQTT_PUBLIC_HOST` | rec. | Broker hostname returned in pairing payload |
-| `MQTT_PUBLIC_PORT` | no | Default 8883 |
-| `MQTT_CA_PEM_PATH` | rec. | Path to broker CA bundle returned to devices |
-| `MOSQUITTO_DIR` | no | Default `/mosquitto-config` |
-| `MOSQUITTO_CONTAINER` | no | Default `evolights-cloud-mosquitto-1` |
-| `STRIPE_SECRET_KEY` | **yes** | `sk_live_...` in prod |
-| `STRIPE_WEBHOOK_SECRET` | **yes** |  |
-| `STRIPE_PRICE_ID_MONTHLY` | **yes** | The single subscription price |
-| `STRIPE_PRICE_AMOUNT_CENTS` | no | For MRR estimate in admin stats |
-| `BILLING_SUCCESS_URL` | no | Default `evolights://billing/success?session_id={CHECKOUT_SESSION_ID}` |
-| `BILLING_CANCEL_URL` | no | Default `evolights://billing/cancel` |
-| `BILLING_PORTAL_RETURN_URL` | no | Default `evolights://billing/return` |
-| `OTA_SIGNING_KEY_PATH` | **yes** | Path inside the api container to your `.key` |
-| `EMAIL_PROVIDER` | rec. | `smtp` or `graph` |
-| `EMAIL_FROM` | rec. (with provider) | RFC 5322 From header |
-| `SMTP_HOST` / `_PORT` / `_SECURE` / `_USER` / `_PASS` | per provider |  |
-| `GRAPH_TENANT_ID` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_SENDER_UPN` | per provider |  |
-| `APPLE_CLIENT_ID` | no | Enables `/v1/auth/apple` |
-| `GOOGLE_CLIENT_ID_IOS` / `_ANDROID` / `_WEB` | no | Any one enables `/v1/auth/google` |
-| `RELAY_ACK_TIMEOUT_MS` | no | Default 5000 |
-| `CORS_ORIGIN` | no | Comma-separated allowlist; default deny-all (mobile is unaffected) |
-| `APP_VERSION` | no | Surfaced in `/health` |
+> Vars marked **runtime** are first-boot defaults. Once the api is up, an
+> admin can override them in the admin UI's Settings page (DB takes
+> precedence over env). The other vars stay env-only — they're either
+> genuine deploy-time secrets or container-shape configuration.
+
+| Var | Required | Runtime-editable? | Notes |
+|---|---|---|---|
+| `NODE_ENV` | rec. | no | `production` in prod |
+| `PORT` | rec. | no | Default 8080 |
+| `JWT_SECRET` | **yes** | no | ≥32 chars; rotation logs everyone out |
+| `PAIRING_CODE_TTL_SECONDS` | no | yes (Behavior) | Default 300 (5 min) |
+| `BRAND_NAME` | no | yes (Branding) | Default `EvoLights`; appears in emails |
+| `PUBLIC_WEB_URL` | rec. | yes (Public) | Used in password-reset emails |
+| `PUBLIC_API_URL` | rec. | yes (Public) | Returned in `/v1/pairing/codes` for devices to call |
+| `POSTGRES_*` | **yes** | no |  |
+| `DATABASE_URL` | **yes** | no | Must match the POSTGRES_* values |
+| `MQTT_URL` | **yes** | no | `mqtt://mosquitto:1883` (internal) |
+| `MQTT_API_USERNAME` / `_PASSWORD` | **yes** | no | Cloud's broker creds; must exist in `passwd` |
+| `MQTT_PUBLIC_HOST` | rec. | yes (Public) | Broker hostname returned in pairing payload |
+| `MQTT_PUBLIC_PORT` | no | yes (Public) | Default 8883 |
+| `MQTT_CA_PEM_PATH` | rec. | yes (Public) | Path to broker CA bundle; UI accepts the PEM body directly |
+| `MOSQUITTO_DIR` | no | no | Default `/mosquitto-config` |
+| `MOSQUITTO_CONTAINER` | no | no | Default `evolights-cloud-mosquitto-1` |
+| `STRIPE_SECRET_KEY` | **yes** | no | `sk_live_...` in prod |
+| `STRIPE_WEBHOOK_SECRET` | **yes** | no |  |
+| `STRIPE_PRICE_ID_MONTHLY` | **yes** | yes (Stripe) | The default subscription price |
+| `STRIPE_PRICE_AMOUNT_CENTS` | no | yes (Stripe) | For MRR estimate in admin stats |
+| `BILLING_SUCCESS_URL` | no | no | Default `evolights://billing/success?session_id={CHECKOUT_SESSION_ID}` |
+| `BILLING_CANCEL_URL` | no | no | Default `evolights://billing/cancel` |
+| `BILLING_PORTAL_RETURN_URL` | no | no | Default `evolights://billing/return` |
+| `OTA_SIGNING_KEY_PATH` | **yes** | no | Path inside the api container to your `.key` |
+| `EMAIL_PROVIDER` | rec. | yes (Email) | `smtp` or `graph` |
+| `EMAIL_FROM` | rec. (with provider) | yes (Email) | RFC 5322 From header |
+| `SMTP_HOST` / `_PORT` / `_SECURE` / `_USER` / `_PASS` | per provider | yes (Email) | `_PASS` is secret-redacted in API responses |
+| `GRAPH_TENANT_ID` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_SENDER_UPN` | per provider | yes (Email) | `_CLIENT_SECRET` is secret-redacted |
+| `APPLE_CLIENT_ID` | no | yes (OAuth) | Enables `/v1/auth/apple` |
+| `GOOGLE_CLIENT_ID_IOS` / `_ANDROID` / `_WEB` | no | yes (OAuth) | Any one enables `/v1/auth/google` |
+| `RELAY_ACK_TIMEOUT_MS` | no | yes (Behavior) | Default 5000 |
+| `CORS_ORIGIN` | no | yes (Security, restart req'd) | Comma-separated allowlist; default deny-all (mobile is unaffected) |
+| `APP_VERSION` | no | no | Surfaced in `/health` |
 
 ---
 
