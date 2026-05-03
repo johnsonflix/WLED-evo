@@ -166,5 +166,37 @@ def _apply():
                 err=True,
             )
 
+    # Diagnostic: list every .h file whose name starts with "WiFi" anywhere in
+    # the framework. Lets us see whether WiFiClientSecure is present under a
+    # different name (NetworkClientSecure, WiFiClientSecureBearSSL, etc).
+    try:
+        platform = env.PioPlatform()  # noqa: F821
+        for pkg in CANDIDATE_PACKAGES:
+            try:
+                p = platform.get_package_dir(pkg)
+            except Exception:
+                p = None
+            if not p:
+                continue
+            secho("  -- WiFi*.h under {}:".format(p), fg="cyan", err=True)
+            count = 0
+            for hit in Path(p).rglob("WiFi*.h"):
+                secho("       {}".format(hit), fg="cyan", err=True)
+                count += 1
+                if count > 30:
+                    secho("       ... (truncated at 30)", fg="cyan", err=True)
+                    break
+            # Also look for *ClientSecure*.h to catch renamed variants.
+            secho("  -- *ClientSecure*.h under {}:".format(p), fg="cyan", err=True)
+            count = 0
+            for hit in Path(p).rglob("*ClientSecure*.h"):
+                secho("       {}".format(hit), fg="cyan", err=True)
+                count += 1
+                if count > 30:
+                    secho("       ... (truncated at 30)", fg="cyan", err=True)
+                    break
+    except Exception as e:
+        secho("  diagnostic listing failed: {}".format(e), fg="yellow", err=True)
+
 
 _apply()
