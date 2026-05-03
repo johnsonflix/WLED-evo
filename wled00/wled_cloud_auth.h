@@ -19,7 +19,10 @@
  *      Password is PBKDF2-SHA256 hashed in wsec.json.
  *   2. Cloud: requests carrying the in-RAM cloud-trusted token are bypassed.
  *      The cloud_relay usermod uses this when it dispatches an MQTT command
- *      into the local HTTP stack.
+ *      into the local HTTP stack via 127.0.0.1. The gate ALSO requires the
+ *      request to originate from the loopback address (so a LAN attacker who
+ *      learns/guesses the token cannot use it) — see anchor
+ *      `cloud-token-loopback-only` in wled_cloud_auth.cpp.
  *
  * Persistence: credentials live in wsec.json (LittleFS), which is preserved
  * across OTA updates because OTA only flashes the firmware partition.
@@ -43,7 +46,22 @@ namespace EvoAuth {
   constexpr size_t TOKEN_LEN     = 32;         // hex chars (16 random bytes)
   constexpr uint32_t SESSION_TTL_MS = 7 * 24UL * 3600UL * 1000UL;   // 7 days
   constexpr uint8_t  MAX_SESSIONS = 8;
-  constexpr uint16_t PBKDF2_ITERS = 4096;      // tuned for ESP32 ~50ms
+  // EVOLIGHTS-ANCHOR: pbkdf2-iters
+  // Bumped from 4096 (2010s-grade) to 50000. On an ESP32 @ 240MHz this targets
+  // ~600ms login latency, which is acceptable for a one-time login. If a future
+  // platform measures slower than 500ms, drop this back to the highest value
+  // that stays under 500ms. Stored hashes embed the iteration count
+  // (`v1$<iters>$<salt>$<hash>`), so bumping this constant does NOT invalidate
+  // existing accounts — they keep working with their original iter count
+  // until the user changes their password.
+  constexpr uint32_t PBKDF2_ITERS = 50000;
+  // EVOLIGHTS-ANCHOR: pbkdf2-iters-end
+
+  // Window after boot during which /auth/setup will accept a request from
+  // outside AP mode. Used as a physical-presence proxy: the legitimate first
+  // user is power-cycling or freshly-flashing the device, not an attacker on
+  // a long-online LAN. See anchor `auth-setup-presence` in wled_cloud_auth.cpp.
+  constexpr uint32_t SETUP_PRESENCE_WINDOW_MS = 5UL * 60UL * 1000UL;
 
   // Called once from setup() BEFORE initServer().
   // Registers the AuthGate handler and the /auth/* routes.
@@ -74,6 +92,9 @@ namespace EvoAuth {
   bool verifyPassword(const String &user, const String &pw);
 
   // True if the request carries a valid local session OR cloud-trusted token.
+  // The cloud-trusted token is only honoured for requests from 127.0.0.1 and
+  // is REFUSED for /cloud/pair and /cloud/unpair (those endpoints require a
+  // real local session — see `cloud-pairing-session-only` in the .cpp).
   bool isAuthorized(AsyncWebServerRequest *request);
 }
 
