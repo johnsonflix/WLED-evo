@@ -20,22 +20,34 @@
 #include "ota_verifier.h"
 #include <PubSubClient.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 
 /*
- * EvoLights Cloud Relay
+ * EvoLights Cloud Relay  (TLS via stock platform)
  *
- * Outbound MQTT bridge. After pairing, the device connects to the EvoLights
- * cloud broker and subscribes to its per-device command topic. Commands
- * arriving over MQTT are dispatched into the local HTTP stack with the
- * EvoAuth cloud-trusted token, so they bypass the local auth gate.
+ * Outbound MQTT-over-TLS bridge. After pairing, the device connects to the
+ * EvoLights cloud broker on port 8883 and subscribes to its per-device
+ * command topic. Commands arriving over MQTT are dispatched into the local
+ * HTTP stack with the EvoAuth cloud-trusted token, so they bypass the local
+ * auth gate.
  *
- * !!! TLS TODO !!!
- * Currently uses plain WiFiClient (no TLS). The original design called for
- * MQTT-over-TLS on port 8883, but WLED's build system makes WiFiClientSecure
- * unreachable from a usermod's compile scope. Plain TCP is a placeholder so
- * the rest of the architecture can ship; before any production release we
- * MUST swap in TLS. Per-device auth (mqtt_user/mqtt_pass) still works, but
- * a passive eavesdropper sees credentials in the clear.
+ * Transport security
+ * ------------------
+ * The transport is WiFiClientSecure with the broker's root CA pinned via
+ * setCACert(). The CA is delivered alongside the device credentials in the
+ * pairing response (`ca_cert` field of /v1/devices/redeem) and persisted in
+ * wsec.json under "EvoCloudRelay.ca". We FAIL CLOSED if the CA is empty: the
+ * relay refuses to attempt a connection rather than silently downgrading.
+ *
+ * This compiles because the *_evolights envs in platformio.ini override the
+ * platform to stock PlatformIO espressif32 (see EVOLIGHTS-ANCHOR:
+ * platform-stock-espressif32 in platformio.ini), which retains the full
+ * mbedtls SSL stack and the upstream WiFiClientSecure. Upstream WLED envs
+ * intentionally use Tasmota's slim framework which strips both.
+ *
+ * NB: setInsecure() is deliberately NOT called anywhere in this file. The
+ * verifier (tools/verify-evolights-integration.sh) greps for that to ensure
+ * we never silently regress to no-verify TLS.
  */
 
 namespace EvoLights {
@@ -52,7 +64,9 @@ namespace {
   String g_caCertPem;        // root CA pem for the broker
 
   // ---- runtime state ----
-  WiFiClient g_tcp;          // TODO: swap to TLS client (see file header note)
+  // TLS transport for MQTT. CA is pinned via g_tls.setCACert(g_caCertPem...)
+  // before each connect attempt; we fail closed if the CA string is empty.
+  WiFiClientSecure g_tls;
   PubSubClient *g_mqtt = nullptr;
   bool g_connected = false;
   uint32_t g_nextReconnectAt = 0;
@@ -121,14 +135,27 @@ namespace {
     if (millis() < g_nextReconnectAt) return;
     g_nextReconnectAt = millis() + 5000;
 
+    // Fail closed: refuse to connect at all without a pinned CA. The pairing
+    // flow is responsible for delivering ca_cert; if it's missing, something
+    // is misconfigured and silently downgrading to no-verify TLS would be
+    // worse than refusing to connect.
+    if (g_caCertPem.length() == 0) {
+      Serial.println(F("[CloudRelay] no CA cert pinned; refusing to connect (re-pair the device)"));
+      return;
+    }
+
     if (!g_mqtt) {
-      g_mqtt = new PubSubClient(g_tcp);
+      g_mqtt = new PubSubClient(g_tls);
       g_mqtt->setBufferSize(4096);
       g_mqtt->setCallback(onCmdMessage);
     }
+    // Pin the broker's root CA. WiFiClientSecure::setCACert stores the
+    // pointer (not a copy), so the storage must outlive the TLS session.
+    // g_caCertPem is in the file-static anonymous namespace and only ever
+    // reassigned by handlePair() / disconnectAndForget(), which run on the
+    // same WLED main loop as connectMqtt() — there is no concurrent mutator.
+    g_tls.setCACert(g_caCertPem.c_str());
     g_mqtt->setServer(g_brokerHost.c_str(), g_brokerPort);
-    // TODO TLS: when WiFiClientSecure is wired in, gate on g_caCertPem and
-    // call g_tls.setCACert(g_caCertPem.c_str()) here. Today we connect plain.
 
     String clientId = String(F("evo-")) + g_deviceId;
     if (g_mqtt->connect(clientId.c_str(), g_mqttUser.c_str(), g_mqttPass.c_str())) {

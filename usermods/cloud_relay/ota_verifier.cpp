@@ -2,14 +2,15 @@
 
 #if defined(ARDUINO_ARCH_ESP32)
 
-// wled.h provides ArduinoJson + WiFi + Update transitively. We can't include
-// <WiFiClientSecure.h> here for the same reason cloud_relay.cpp can't: WLED's
-// Tasmota-slim ESP32 framework strips mbedtls SSL. The OTA download therefore
-// runs over plain HTTP — the Ed25519 signature on `version|url|sha256` is the
-// real trust anchor, not the transport. See "Trust model" comment below.
+// wled.h provides ArduinoJson + WiFi + Update transitively. The *_evolights
+// envs override the platform to stock PlatformIO espressif32 (see
+// EVOLIGHTS-ANCHOR: platform-stock-espressif32 in platformio.ini), which
+// retains the full mbedtls SSL stack and WiFiClientSecure — so we can
+// download the firmware artifact over HTTPS.
 #include "ota_verifier.h"
 #include <HTTPClient.h>
 #include <Update.h>
+#include <WiFiClientSecure.h>
 #include <mbedtls/base64.h>
 #include <mbedtls/sha256.h>
 
@@ -138,16 +139,25 @@ bool processManifest(const char *json, size_t len) {
   Serial.printf("[OTA] sig OK; downloading %s\n", url.c_str());
 
   // EVOLIGHTS-ANCHOR: ota-trust-model
-  // Trust model: the Ed25519 signature on `version|url|sha256` (verified above
-  // against the OTA_PUBKEY_B64 compiled into firmware) is the trust anchor
-  // for what we flash. The download itself runs over plain HTTP because
-  // WLED's slim ESP32 framework lacks mbedtls SSL — see file header. A MITM
-  // can only:
+  // Trust model: the Ed25519 signature on `version|url|sha256` (verified
+  // above against the OTA_PUBKEY_B64 compiled into firmware) is the
+  // canonical trust anchor for what we flash. We additionally use TLS for
+  // the artifact download to deny passive observers visibility into which
+  // device is fetching which build, and to deny on-path attackers the
+  // ability to silently swap the bytes for a different signed payload (which
+  // would still fail sha256 and signature checks — but failing earlier is
+  // strictly better).
+  //
+  // The artifact is served from a CDN whose CA is not the same as the MQTT
+  // broker CA (which lives in cloud_relay state), so we use setInsecure()
+  // here: the Ed25519 signature on `version|url|sha256` plus the sha256
+  // verify on the downloaded bytes is the actual trust chain. A MITM can:
   //   - drop/corrupt the bytes        -> sha256 mismatch -> Update.abort()
   //   - feed a previously-signed bin  -> downgrade check above OR sha256 mismatch
   //   - inject malware                -> signature wouldn't verify; we never reach here
-  // Pinning a CDN CA cert is moot in this build (no TLS client available).
-  WiFiClient client;
+  // Even with setInsecure() the transport is still encrypted on the wire.
+  WiFiClientSecure client;
+  client.setInsecure();
   HTTPClient http;
   if (!http.begin(client, url)) { Serial.println(F("[OTA] http.begin failed")); return false; }
   // EVOLIGHTS-ANCHOR: ota-trust-model-end
