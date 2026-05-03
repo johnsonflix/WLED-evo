@@ -58,6 +58,18 @@ declare -A ANCHORS=(
   ["auth-read-wsec:wled00/cfg.cpp"]=1
   ["auth-write-wsec:wled00/cfg.cpp"]=1
   ["env-evolights:platformio.ini"]=1
+  # Critical-finding fixes (PR fix/firmware-criticals): each invariant below
+  # corresponds to a specific security regression we don't want silently
+  # reintroduced by a future merge.
+  ["cloud-token-loopback-only:wled00/wled_cloud_auth.cpp"]=1
+  ["cloud-pairing-session-only:wled00/wled_cloud_auth.cpp"]=1
+  ["ap-setup-allowlist:wled00/wled_cloud_auth.cpp"]=1
+  ["auth-setup-mutex:wled00/wled_cloud_auth.cpp"]=1
+  ["auth-setup-presence:wled00/wled_cloud_auth.cpp"]=1
+  ["session-lru-eviction:wled00/wled_cloud_auth.cpp"]=1
+  ["cookie-parse-anchored:wled00/wled_cloud_auth.cpp"]=1
+  ["login-timing-oracle-verify:wled00/wled_cloud_auth.cpp"]=1
+  ["pbkdf2-iters:wled00/wled_cloud_auth.h"]=1
 )
 
 for key in "${!ANCHORS[@]}"; do
@@ -152,6 +164,40 @@ require_in_file wled00/wled_cloud_auth.h 'void init\(AsyncWebServer'        "Evo
 require_in_file wled00/wled_cloud_auth.h 'bool readFromWsec\(.*JsonObject'  "EvoAuth::readFromWsec declared"
 require_in_file wled00/wled_cloud_auth.h 'void writeToWsec\(.*JsonObject'      "EvoAuth::writeToWsec declared"
 require_in_file wled00/wled_cloud_auth.h 'cloudTrustedToken\(\)'              "EvoAuth::cloudTrustedToken declared (cloud_relay depends on it)"
+
+# ---------------------------------------------------------------------
+# 6. Security invariants (positive checks for the critical-finding fixes).
+# ---------------------------------------------------------------------
+section "Security invariants"
+
+# PBKDF2 must be at least 50000 iters.
+if grep -qE 'PBKDF2_ITERS = (5[0-9]{4}|[6-9][0-9]{4}|[1-9][0-9]{5,})' wled00/wled_cloud_auth.h; then
+  ok "PBKDF2_ITERS >= 50000 in wled_cloud_auth.h"
+else
+  fail "PBKDF2_ITERS appears below 50000 — login is vulnerable to brute force"
+fi
+
+# Cloud-trusted token must be loopback-gated.
+require_in_file wled00/wled_cloud_auth.cpp 'isLoopbackPeer' \
+  "isLoopbackPeer helper is referenced (cloud token loopback-only)"
+
+# /cloud/pair and /cloud/unpair must be mentioned by the pairing-session-only
+# code path so a future refactor can't silently drop the special case.
+require_in_file wled00/wled_cloud_auth.cpp '/cloud/pair' \
+  "/cloud/pair is referenced in isAuthorized (cloud-pairing-session-only)"
+require_in_file wled00/wled_cloud_auth.cpp '/cloud/unpair' \
+  "/cloud/unpair is referenced in isAuthorized (cloud-pairing-session-only)"
+
+# Setup mutex flag must exist.
+require_in_file wled00/wled_cloud_auth.cpp 'g_setupInProgress' \
+  "/auth/setup mutex flag g_setupInProgress present"
+
+# Cookie parser must contain anchored marker logic (look for the comment
+# describing the start-of-string OR '; ' rule, AND the actual char checks).
+require_in_file wled00/wled_cloud_auth.cpp "atStart" \
+  "Cookie parser contains anchored start-of-string check"
+require_in_file wled00/wled_cloud_auth.cpp "afterDelim" \
+  "Cookie parser contains anchored after-delimiter check"
 
 # ---------------------------------------------------------------------
 # Summary
