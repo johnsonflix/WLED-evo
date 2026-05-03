@@ -157,46 +157,20 @@ def _apply():
     )
     for header, hits in located.items():
         if hits:
-            for h in hits:
-                secho("  found {} -> {}".format(header, h), fg="cyan", err=True)
+            secho("  resolved {} -> {}".format(header, hits[0]), fg="cyan", err=True)
         else:
+            # WiFiClientSecure.h is intentionally absent from tasmota's slim
+            # framework-arduinoespressif32 v2.0.18 (the upstream zipball strips
+            # it). cloud_relay vendors its own copy under
+            # usermods/cloud_relay/vendor/WiFiClientSecure/, so a MISSING line
+            # here for that header is expected and not an error.
             secho(
-                "  MISSING {} — not found anywhere under framework pkg".format(header),
+                "  MISSING {} — not found under framework pkg "
+                "(expected for WiFiClientSecure.h on tasmota slim 2.0.18; "
+                "cloud_relay carries its own copy)".format(header),
                 fg="yellow",
                 err=True,
             )
-
-    # Diagnostic: list every .h file whose name starts with "WiFi" anywhere in
-    # the framework. Lets us see whether WiFiClientSecure is present under a
-    # different name (NetworkClientSecure, WiFiClientSecureBearSSL, etc).
-    try:
-        platform = env.PioPlatform()  # noqa: F821
-        for pkg in CANDIDATE_PACKAGES:
-            try:
-                p = platform.get_package_dir(pkg)
-            except Exception:
-                p = None
-            if not p:
-                continue
-            secho("  -- WiFi*.h under {}:".format(p), fg="cyan", err=True)
-            count = 0
-            for hit in Path(p).rglob("WiFi*.h"):
-                secho("       {}".format(hit), fg="cyan", err=True)
-                count += 1
-                if count > 30:
-                    secho("       ... (truncated at 30)", fg="cyan", err=True)
-                    break
-            # Also look for *ClientSecure*.h to catch renamed variants.
-            secho("  -- *ClientSecure*.h under {}:".format(p), fg="cyan", err=True)
-            count = 0
-            for hit in Path(p).rglob("*ClientSecure*.h"):
-                secho("       {}".format(hit), fg="cyan", err=True)
-                count += 1
-                if count > 30:
-                    secho("       ... (truncated at 30)", fg="cyan", err=True)
-                    break
-    except Exception as e:
-        secho("  diagnostic listing failed: {}".format(e), fg="yellow", err=True)
 
 
 _apply()

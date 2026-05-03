@@ -16,12 +16,22 @@
 // wled.h (above) transitively provides ArduinoJson, ESPAsyncWebServer, and WiFi.
 // Including them again here would fail because PIO compiles usermods in an
 // isolated library scope that doesn't see WLED's vendored deps directly.
-// <WiFiClientSecure.h> and <HTTPClient.h> are reachable thanks to the
-// EVOLIGHTS-ANCHOR: usermod-framework-includes patch in pio-scripts/load_usermods.py.
+// <HTTPClient.h> is reachable thanks to the EVOLIGHTS-ANCHOR:
+// usermod-framework-includes patch in pio-scripts/load_usermods.py +
+// pio-scripts/expose_framework_libs.py.
+//
+// WiFiClientSecure is VENDORED: tasmota's framework-arduinoespressif32 v2.0.18
+// (used for these EvoLights builds) is a slimmed distribution that has stripped
+// WiFiClientSecure entirely; HTTPClient ships SSL stubs that prevent linker
+// complaints but do NOT actually do TLS. We carry our own copy of the upstream
+// WiFiClientSecure source under vendor/WiFiClientSecure/ and #include it via
+// the relative path so we get a real, CA-pinned TLS stack regardless.
+// EVOLIGHTS-ANCHOR: cloud-relay-tls-vendor
 #include "wled_cloud_auth.h"
 #include <PubSubClient.h>
 #include <HTTPClient.h>
-#include <WiFiClientSecure.h>
+#include "vendor/WiFiClientSecure/WiFiClientSecure.h"
+// EVOLIGHTS-ANCHOR: cloud-relay-tls-vendor-end
 
 /*
  * EvoLights Cloud Relay

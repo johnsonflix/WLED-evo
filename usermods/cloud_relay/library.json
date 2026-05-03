@@ -1,7 +1,17 @@
 {
   "name": "EvoLightsCloudRelay",
   "build": {
-    "libArchive": false
+    "libArchive": false,
+    "srcFilter": [
+      "+<*.cpp>",
+      "+<*.c>",
+      "+<vendor/WiFiClientSecure/*.cpp>",
+      "+<vendor/WiFiClientSecure/*.c>"
+    ],
+    "includeDir": ".",
+    "flags": [
+      "-I./vendor/WiFiClientSecure"
+    ]
   },
   "dependencies": {
     "knolleary/PubSubClient": "^2.8"

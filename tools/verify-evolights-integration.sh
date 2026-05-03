@@ -74,6 +74,7 @@ declare -A ANCHORS=(
   ["cloud-relay-tls-client:usermods/cloud_relay/cloud_relay.cpp"]=1
   ["cloud-relay-tls-fail-closed:usermods/cloud_relay/cloud_relay.cpp"]=1
   ["cloud-relay-tls-pin-ca:usermods/cloud_relay/cloud_relay.cpp"]=1
+  ["cloud-relay-tls-vendor:usermods/cloud_relay/cloud_relay.cpp"]=1
 )
 
 for key in "${!ANCHORS[@]}"; do
@@ -121,8 +122,32 @@ require_in_file usermods/cloud_relay/cloud_relay.cpp 'REGISTER_USERMOD' \
 # TLS invariants — these encode the security promise: real WiFiClientSecure,
 # real CA pinning, real fail-closed when no CA is on file. None of these may
 # silently regress to plaintext or setInsecure().
-require_in_file usermods/cloud_relay/cloud_relay.cpp '#include <WiFiClientSecure\.h>' \
-  "cloud_relay includes <WiFiClientSecure.h>"
+#
+# WiFiClientSecure is sourced two ways depending on the env's framework: the
+# tasmota framework-arduinoespressif32 v2.0.18 distribution USED FOR THESE
+# BUILDS strips it, so we vendor a copy under usermods/cloud_relay/vendor/. The
+# include match below accepts either the system header or the vendored relative
+# path, but at least one must be present.
+if grep -qE '#include[[:space:]]+(<WiFiClientSecure\.h>|"vendor/WiFiClientSecure/WiFiClientSecure\.h")' \
+     usermods/cloud_relay/cloud_relay.cpp; then
+  ok "cloud_relay includes WiFiClientSecure.h (system or vendored)"
+else
+  fail "cloud_relay.cpp must #include WiFiClientSecure.h (either <…> or \"vendor/…\")"
+fi
+# Vendored copy must be present on disk: the tasmota slim framework is
+# missing the system header, so the vendored fallback is load-bearing.
+for f in \
+  usermods/cloud_relay/vendor/WiFiClientSecure/WiFiClientSecure.h \
+  usermods/cloud_relay/vendor/WiFiClientSecure/WiFiClientSecure.cpp \
+  usermods/cloud_relay/vendor/WiFiClientSecure/ssl_client.h \
+  usermods/cloud_relay/vendor/WiFiClientSecure/ssl_client.cpp \
+  usermods/cloud_relay/vendor/WiFiClientSecure/esp_crt_bundle.h \
+  usermods/cloud_relay/vendor/WiFiClientSecure/esp_crt_bundle.c \
+; do
+  if [[ -f "$f" ]]; then ok "vendored TLS source: $f"
+  else fail "missing vendored TLS source: $f"
+  fi
+done
 require_in_file usermods/cloud_relay/cloud_relay.cpp 'WiFiClientSecure[[:space:]]+g_tls' \
   "cloud_relay declares a WiFiClientSecure transport (g_tls)"
 require_in_file usermods/cloud_relay/cloud_relay.cpp 'g_tls\.setCACert\(' \
